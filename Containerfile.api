@@ -1,0 +1,129 @@
+# Combined Containerfile for the codecov API image.
+# Uses Red Hat UBI 9 base images for actively patched CVE coverage.
+# Python 3.13 installed from EPEL since UBI skipped 3.13 (goes 3.12 → 3.14)
+# and several Rust-based deps (orjson, pydantic-core) lack 3.14 wheels.
+
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:dfa0eb04abc59221544e74862432496add1f491f915c9b531880f91affc0e12c
+
+# =============================================================================
+# Stage 1 — Build wheels for all dependencies
+# =============================================================================
+FROM $BASE_IMAGE AS requirements-build
+
+USER root
+
+RUN microdnf install -y \
+    gcc \
+    gcc-c++ \
+    make \
+    libffi-devel \
+    libpq-devel \
+    libxml2-devel \
+    libxslt-devel \
+    git-core \
+    tar \
+    gzip \
+    findutils \
+    && microdnf clean all
+
+# Install Python 3.13 from EPEL
+RUN rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    microdnf install -y python3.13 python3.13-devel python3.13-pip && \
+    microdnf clean all
+
+# Install Rust toolchain for building native extensions
+ARG RUST_VERSION=stable
+ENV RUST_VERSION=${RUST_VERSION}
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | bash -s -- -y --profile minimal --default-toolchain $RUST_VERSION
+ENV PATH="/root/.cargo/bin:$PATH"
+
+# Install uv
+RUN python3.13 -m pip install uv==0.13.10
+
+WORKDIR /build
+
+ENV UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PYTHON=python3.13 \
+    UV_PROJECT_ENVIRONMENT=/app
+
+COPY pyproject.toml uv.lock ./
+COPY libs/shared libs/shared
+
+RUN uv export --no-group dev --no-hashes --frozen --format requirements-txt > requirements.txt
+
+RUN grep -v '^-e ' requirements.txt > requirements.remote.txt
+
+RUN python3.13 -m pip wheel -w /wheels --find-links /wheels -r requirements.remote.txt
+
+RUN uv build --all-packages --wheel -o /wheels
+
+# =============================================================================
+# Stage 2 — Install wheels into a clean runtime image
+# =============================================================================
+FROM $BASE_IMAGE AS requirements
+
+USER root
+
+# Apply all OS security updates (base image may lag behind RHSA fixes),
+# then install Python 3.13 runtime + needed native libs
+RUN microdnf upgrade -y && \
+    rpm -ivh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && \
+    microdnf install -y \
+    python3.13 \
+    python3.13-pip \
+    libpq \
+    libxslt \
+    make \
+    && microdnf clean all
+
+RUN python3.13 -m pip install uv==0.13.10
+
+ENV UV_PYTHON=python3.13
+
+COPY --from=requirements-build /wheels/ /wheels/
+
+COPY pyproject.toml uv.lock ./
+COPY libs/shared libs/shared
+
+RUN uv pip install --no-deps --no-index --find-links=/wheels /wheels/* --system
+
+# grpcio < 1.80.1 and stripe < 17 bundle CA files that trust the compromised
+# eMudhra roots; point them at the patched certifi bundle instead.
+RUN python3.13 -c "import certifi, grpc, shutil, stripe, pathlib; \
+    [shutil.copyfile(certifi.where(), f) for f in ( \
+    pathlib.Path(grpc.__file__).parent / '_cython/_credentials/roots.pem', \
+    pathlib.Path(stripe.__file__).parent / 'data/ca-certificates.crt')]"
+
+# =============================================================================
+# Stage 3 — Build the API application image
+# =============================================================================
+FROM requirements AS app
+
+# api.sh and worker.sh use bare "python" and "gunicorn" commands
+RUN ln -sf /usr/bin/python3.13 /usr/bin/python && \
+    ln -sf /usr/bin/python3.13 /usr/bin/python3
+
+RUN useradd --system --uid 1001 --home-dir /home/codecov --create-home codecov
+COPY --chown=1001:0 --chmod=775 . /app
+USER 1001
+
+WORKDIR /app/apps/codecov-api
+RUN python3.13 manage.py collectstatic --no-input
+
+ARG RELEASE_VERSION
+ENV RELEASE_VERSION=$RELEASE_VERSION
+ENV RUN_ENV="ENTERPRISE"
+ENV CODECOV_API_PORT=8000
+
+# self-hosted-runtime: extra deps for environments without native postgres/tls
+USER root
+ARG EXTERNAL_DEPS_FOLDER=./external_deps
+RUN mkdir "$EXTERNAL_DEPS_FOLDER" \
+    && python3.13 -m pip install --target "$EXTERNAL_DEPS_FOLDER" psycopg2-binary==2.9.13 tlslite-ng==0.8.2 \
+    && chown -R 1001:0 "$EXTERNAL_DEPS_FOLDER" && chmod -R g+rx "$EXTERNAL_DEPS_FOLDER"
+USER 1001
+
+ENTRYPOINT ["./api.sh"]
