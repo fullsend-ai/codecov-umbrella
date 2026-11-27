@@ -34,7 +34,7 @@
 # target no matter what.
 #####
 
-export sha := $(shell git rev-parse --short=7 HEAD)
+export sha := $(shell git rev-parse HEAD | cut -c1-7)
 export full_sha := $(shell git rev-parse HEAD)
 export long_sha := ${full_sha}
 export merge_sha := $(shell git merge-base HEAD^ origin/main)
