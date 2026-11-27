@@ -58,3 +58,34 @@ fork; the tag fix is a candidate to propose upstream
 
 **Rebase notes:** Re-apply if upstream renames these jobs, introduces more
 `ubuntu-large` runners, or changes how the image tag is derived.
+
+## notifications: configurable GitHub app slug in the install-app warning
+
+**Files:**
+- `apps/worker/services/notification/notifiers/mixins/message/sections.py`
+
+**Reason:** The comment notifier's "install the Codecov GitHub app" warning
+hardcoded `https://github.com/apps/codecov/installations/select_target`. A
+self-hosted deployment installs an app under its own slug, so the link pointed
+at the wrong app. The slug is read from `github.app_slug` and defaults to
+`codecov`; values that are not a valid slug fall back to the default, so a
+configured value never reaches the Markdown link destination unvalidated.
+
+**Upstream status:** Pending
+**Upstream PR:** none yet
+**Owner:** @psturc
+
+**Rebase notes:** Only the warning branch of
+`_write_install_github_app_warning` is modified. Tests asserting the default URL
+stay valid because the default slug is `codecov`.
+
+## Pending decision: Sentry webhook integration
+
+The self-hosted deployment previously carried a Sentry (GlitchTip) webhook
+integration: `apps/codecov-api/api/sentry/`,
+`apps/codecov-api/codecov_auth/views/sentry.py`,
+`apps/codecov-api/webhook_handlers/views/sentry.py` and
+`libs/shared/shared/helpers/sentry.py`. Upstream has since restructured this
+area and no longer ships those endpoints, so they are **not** carried here. Port
+them only if the deployment actually registers the Codecov Sentry app;
+otherwise they are dead code.

@@ -367,6 +367,9 @@ config_schema = {
         "type": "dict",
         "schema": {
             **default_service_fields,
+            # app_slug - Slug of the GitHub App installed on this instance,
+            # used in user-facing links. Defaults to "codecov".
+            "app_slug": {"type": "string"},
             # integration - Credentials for the default Codecov App
             "integration": {
                 "type": "dict",
