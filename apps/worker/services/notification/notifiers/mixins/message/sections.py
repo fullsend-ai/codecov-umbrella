@@ -1,5 +1,6 @@
 import logging
 import random
+import re
 from base64 import b64encode
 from dataclasses import dataclass
 from decimal import Decimal
@@ -24,9 +25,12 @@ from services.notification.notifiers.mixins.message.helpers import (
 )
 from services.urls import get_commit_url_from_commit_sha, get_pull_graph_url
 from services.yaml.reader import get_components_from_yaml, round_number
+from shared.config import get_config
 from shared.helpers.yaml import walk
 from shared.reports.resources import Report
 from shared.validation.helpers import LayoutStructure
+
+github_app_slug_re = re.compile(r"[A-Za-z0-9-]+")
 
 log = logging.getLogger(__name__)
 
@@ -751,7 +755,12 @@ class MessagesToUserSectionWriter(BaseSectionWriter):
             owner.integration_id is not None or owner.github_app_installations != []
         )
         if is_user_in_github and not is_enterprise() and not owner_is_using_app:
-            return ":exclamation: Your organization needs to install the [Codecov GitHub app](https://github.com/apps/codecov/installations/select_target) to enable full functionality."
+            app_slug = get_config("github", "app_slug", default="codecov")
+            if not isinstance(app_slug, str) or not github_app_slug_re.fullmatch(
+                app_slug
+            ):
+                app_slug = "codecov"
+            return f":exclamation: Your organization needs to install the [Codecov GitHub app](https://github.com/apps/{app_slug}/installations/select_target) to enable full functionality."
         return ""
 
     def do_write_section(self, comparison: ComparisonProxy, *args, **kwargs):

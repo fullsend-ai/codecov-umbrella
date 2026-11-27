@@ -3930,3 +3930,36 @@ class TestMessagesToUserSection:
             )._write_different_upload_count_warning(fake_comparison)
             == expected
         )
+
+    def _install_warning_for(self, mocker, app_slug):
+        repo = RepositoryFactory(author__service="github", author__integration_id=None)
+        commit = CommitFactory(repository=repo)
+        mocker.patch(
+            "services.notification.notifiers.mixins.message.sections.is_enterprise",
+            return_value=False,
+        )
+        mocker.patch(
+            "services.notification.notifiers.mixins.message.sections.get_config",
+            return_value=app_slug,
+        )
+        fake_comparison = mocker.MagicMock(head=mocker.MagicMock(commit=commit))
+        return MessagesToUserSectionWriter(
+            repo, mocker.MagicMock(), False, mocker.MagicMock(), {}
+        )._write_install_github_app_warning(fake_comparison)
+
+    def test_install_github_app_warning_uses_configured_app_slug(self, mocker):
+        message = self._install_warning_for(mocker, "my-codecov")
+
+        assert (
+            "https://github.com/apps/my-codecov/installations/select_target" in message
+        )
+
+    @pytest.mark.parametrize(
+        "app_slug", ["example) [x](https://attacker.example", None, 123]
+    )
+    def test_install_github_app_warning_ignores_an_invalid_app_slug(
+        self, mocker, app_slug
+    ):
+        message = self._install_warning_for(mocker, app_slug)
+
+        assert "https://github.com/apps/codecov/installations/select_target" in message
