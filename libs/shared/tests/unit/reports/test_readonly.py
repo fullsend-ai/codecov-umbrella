@@ -286,6 +286,17 @@ class TestReadOnly:
         assert r.totals == r._totals
         assert not mocked_process_totals.called
 
+    def test_from_chunks_maps_filenames_to_their_serialized_chunk_index(
+        self, sample_rust_report
+    ):
+        # The index in the files dict is the chunk index the rust parser
+        # expects, and it need not match the insertion order of the dict.
+        assert sample_rust_report.rust_report._filename_mapping == {
+            "awesome/__init__.py": 2,
+            "tests/__init__.py": 0,
+            "tests/test_sample.py": 1,
+        }
+
     def test_filter_totals(self, sample_report):
         r = ReadOnlyReport.create_from_report(sample_report)
         assert r.filter(paths=[".*.go"]).totals.asdict() == {
