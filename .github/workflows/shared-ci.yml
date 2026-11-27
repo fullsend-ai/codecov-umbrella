@@ -44,7 +44,9 @@ jobs:
     name: Benchmarks (Shared)
     # Skip on merge_group because CodSpeed does not support it yet.
     # Ref: https://github.com/CodSpeedHQ/action/issues/126
-    if: ${{ inputs.skip == false && github.event_name != 'merge_group' }}
+    # Benchmarks publish to CodSpeed, which needs CODSPEED_TOKEN; only the
+    # upstream repository has it.
+    if: ${{ inputs.skip == false && github.event_name != 'merge_group' && github.repository_owner == 'codecov' }}
     runs-on: ubuntu-latest
     defaults:
       run:
