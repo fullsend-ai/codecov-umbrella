@@ -30,3 +30,31 @@ wrong chunk.
 `{name: [index, totals, None, diff_totals]}` for each file, or
 `{name: [index, None]}` when totals are omitted. The chunk index is element 0 in
 both shapes.
+
+## CI: build the test image on a hosted runner and skip CodSpeed
+
+**Files:**
+- `.github/workflows/_build-app.yml`
+- `.github/workflows/shared-ci.yml`
+- `Makefile`
+
+**Reason:** `build-test-app` requested `ubuntu-large`, a larger runner that only
+the upstream organization has. Without it the job queues indefinitely, and
+every test job depending on it never starts. `shared-benchmark` uploads results
+to CodSpeed, which requires a `CODSPEED_TOKEN` secret; without it the job fails
+with `HTTP 401` on every pull request. The test image tag came from
+`git rev-parse --short=7`, which returns a longer abbreviation when the seven
+character prefix is ambiguous among the objects a clone contains: the build job
+checks out shallowly and the test jobs in full, so the same commit produced two
+tags and `docker compose` tried to pull an image that was never built.
+
+Here the test image builds on `ubuntu-latest`, benchmarks run only in the
+upstream repository, and the tag is cut explicitly to seven characters.
+
+**Upstream status:** the runner, CodSpeed and tag changes are local to this
+fork; the tag fix is a candidate to propose upstream
+**Upstream PR:** none yet
+**Owner:** @psturc
+
+**Rebase notes:** Re-apply if upstream renames these jobs, introduces more
+`ubuntu-large` runners, or changes how the image tag is derived.
